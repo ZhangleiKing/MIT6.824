@@ -1,5 +1,12 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"io"
+	"os"
+	"sort"
+)
+
 // doReduce does the job of a reduce worker: it reads the intermediate
 // key/value pairs (produced by the map phase) for this task, sorts the
 // intermediate key/value pairs by key, calls the user-defined reduce function
@@ -31,4 +38,47 @@ func doReduce(
 	// 	enc.Encode(KeyValue{key, reduceF(...)})
 	// }
 	// file.Close()
+
+	//open File and read keyvalue pair, then sort the array
+	kvMap := make(map[string][]string)
+	for i := 0; i < nMap; i++ {
+		//get the intermediate file name
+		fileName := reduceName(jobName, i, reduceTaskNumber)
+		inFile, err := os.Open(fileName)
+		if err != nil {
+			panic("can't open file: " + fileName)
+		}
+		//before doReduce close, invoking this
+		defer inFile.Close()
+
+		//Read and decode file content
+		var kv KeyValue
+		//classify key
+		for decoder := json.NewDecoder(inFile); decoder.Decode(&kv) != io.EOF; {
+			kvMap[kv.Key] = append(kvMap[kv.Key], kv.Value)
+		}
+	}
+
+	var keys []string
+	//?? should like kvMap.keySet()?
+	for k := range kvMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	//get mergeFileName
+	mergeFileName := mergeName(jobName, reduceTaskNumber)
+
+	merge_file, err := os.Create(mergeFileName)
+	if err != nil {
+		panic("can't create file: " + mergeFileName)
+	}
+	defer merge_file.Close()
+
+	out_encoder := json.NewEncoder(merge_file)
+	for _, k := range keys {
+		//statistic each key's frequency sum
+		reduced_value := reduceF(k, kvMap[k])
+		out_encoder.Encode(KeyValue{k, reduced_value})
+	}
 }
